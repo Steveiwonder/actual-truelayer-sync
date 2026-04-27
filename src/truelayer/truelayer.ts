@@ -1,5 +1,6 @@
 import axios from 'axios'
 import type { TrueLayerAccount, TrueLayerCard, TrueLayerTransaction, TrueLayerTokenResponse } from './types'
+import { NETWORK_TIMEOUT } from '../utils/network'
 
 const BASE_URL = 'https://api.truelayer.com/data/v1'
 const AUTH_URL = 'https://auth.truelayer.com/connect/token'
@@ -27,7 +28,7 @@ export async function refreshToken(
         client_secret: clientSecret,
         refresh_token: refreshToken,
       }).toString(),
-      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: NETWORK_TIMEOUT },
     )
     return { access_token: res.data.access_token, refresh_token: res.data.refresh_token }
   } catch (err) {
@@ -37,14 +38,14 @@ export async function refreshToken(
 
 export async function listAccounts(accessToken: string): Promise<TrueLayerAccount[]> {
   const res = await axios.get<{ results: TrueLayerAccount[] }>(`${BASE_URL}/accounts`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
+    headers: { Authorization: `Bearer ${accessToken}`, timeout: NETWORK_TIMEOUT },
   })
   return res.data.results
 }
 
 export async function listCards(accessToken: string): Promise<TrueLayerCard[]> {
   const res = await axios.get<{ results: TrueLayerCard[] }>(`${BASE_URL}/cards`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
+    headers: { Authorization: `Bearer ${accessToken}`, timeout: NETWORK_TIMEOUT },
   })
   return res.data.results
 }
@@ -56,7 +57,7 @@ export async function getAccountTransactions(
 ): Promise<TrueLayerTransaction[]> {
   const params = from ? { from } : {}
   const res = await axios.get<{ results: TrueLayerTransaction[] }>(`${BASE_URL}/accounts/${accountId}/transactions`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
+    headers: { Authorization: `Bearer ${accessToken}`, timeout: NETWORK_TIMEOUT },
     params,
   })
   return res.data.results
@@ -69,7 +70,7 @@ export async function getCardTransactions(
 ): Promise<TrueLayerTransaction[]> {
   const params = from ? { from } : {}
   const res = await axios.get<{ results: TrueLayerTransaction[] }>(`${BASE_URL}/cards/${cardId}/transactions`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
+    headers: { Authorization: `Bearer ${accessToken}`, timeout: NETWORK_TIMEOUT },
     params,
   })
   return res.data.results
