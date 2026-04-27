@@ -91,22 +91,20 @@ describe('syncAccount', () => {
     expect(actual.importTransactions).not.toHaveBeenCalled()
   })
 
-  it('updates lastSyncDate after successful import', async () => {
+  it('returns the new lastSyncDate after successful import', async () => {
     vi.mocked(truelayer.getAccountTransactions).mockResolvedValueOnce([mockTransaction])
     vi.mocked(actual.importTransactions).mockResolvedValueOnce({ added: ['txn-1'], updated: [] })
 
-    const account = { ...baseAccount }
-    await syncAccount(account, baseConnection, 'access-token', accountsById, false)
+    const result = await syncAccount({ ...baseAccount }, baseConnection, 'access-token', accountsById, false)
 
-    expect(account.lastSyncDate).toBe(new Date().toISOString().slice(0, 10))
+    expect(result).toBe(new Date().toISOString().slice(0, 10))
   })
 
-  it('does not update lastSyncDate when no transactions returned', async () => {
+  it('returns undefined when no transactions returned', async () => {
     vi.mocked(truelayer.getAccountTransactions).mockResolvedValueOnce([])
 
-    const account: Account = { ...baseAccount }
-    await syncAccount(account, baseConnection, 'access-token', emptyAccountsById, false)
+    const result = await syncAccount({ ...baseAccount }, baseConnection, 'access-token', emptyAccountsById, false)
 
-    expect(account.lastSyncDate).toBeUndefined()
+    expect(result).toBeUndefined()
   })
 })

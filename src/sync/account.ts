@@ -13,7 +13,7 @@ export async function syncAccount(
   accessToken: string,
   trueLayerAccountsById: Map<string, TrueLayerAccount | TrueLayerCard>,
   includeCategoryInNotes: boolean,
-): Promise<void> {
+): Promise<string | undefined> {
   const prefix = `[${connection.name}][${configAccount.friendlyName}]`
   const fromDate = configAccount.lastSyncDate ? computeFromDate(configAccount.lastSyncDate) : undefined
 
@@ -32,15 +32,16 @@ export async function syncAccount(
     includeCategoryInNotes,
   )
 
-  if (transactions.length > 0) {
-    console.log(`${prefix} └ Found ${transactions.length} transactions.`)
-    const dates = trueLayerTransactions.map((t) => t.timestamp).sort()
-    const from = dates[0].slice(0, 10)
-    const to = dates[dates.length - 1].slice(0, 10)
-    const result = await importTransactions(configAccount.actualId, transactions)
-    configAccount.lastSyncDate = new Date().toISOString().slice(0, 10)
-    console.log(`${prefix} └ ${buildImportSummary(result.added.length, result.updated.length)} (${from} → ${to}).`)
-  } else {
+  if (transactions.length === 0) {
     console.log(`${prefix} └ No transactions.`)
+    return undefined
   }
+
+  console.log(`${prefix} └ Found ${transactions.length} transactions.`)
+  const dates = trueLayerTransactions.map((t) => t.timestamp).sort()
+  const from = dates[0].slice(0, 10)
+  const to = dates[dates.length - 1].slice(0, 10)
+  const result = await importTransactions(configAccount.actualId, transactions)
+  console.log(`${prefix} └ ${buildImportSummary(result.added.length, result.updated.length)} (${from} → ${to}).`)
+  return new Date().toISOString().slice(0, 10)
 }

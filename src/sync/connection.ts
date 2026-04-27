@@ -22,7 +22,16 @@ export async function syncConnection(connection: Connection, config: Config): Pr
     const trueLayerAccountsById = await fetchAccountMap(connection, access_token)
 
     for (const configAccount of connection.accounts) {
-      await syncAccount(configAccount, connection, access_token, trueLayerAccountsById, config.includeCategoryInNotes)
+      const newLastSyncDate = await syncAccount(
+        configAccount,
+        connection,
+        access_token,
+        trueLayerAccountsById,
+        config.includeCategoryInNotes,
+      )
+      if (newLastSyncDate) {
+        configAccount.lastSyncDate = newLastSyncDate
+      }
     }
 
     const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1)
