@@ -33,17 +33,17 @@ const baseConfig: Config = {
 describe('syncConnection', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('refreshes the token and updates connection.refreshToken', async () => {
+  it('returns an updated connection with the new refresh token', async () => {
     vi.mocked(truelayer.refreshToken).mockResolvedValueOnce({
       access_token: 'new-access',
       refresh_token: 'new-refresh',
     })
     vi.mocked(accounts.fetchAccountMap).mockResolvedValueOnce(new Map())
+    vi.mocked(account.syncAccount).mockResolvedValueOnce(false)
 
-    const connection = { ...baseConnection }
-    await syncConnection(connection, baseConfig)
+    const result = await syncConnection({ ...baseConnection }, baseConfig)
 
-    expect(connection.refreshToken).toBe('new-refresh')
+    expect(result?.refreshToken).toBe('new-refresh')
   })
 
   it('calls fetchAccountMap with the connection and access token', async () => {
@@ -52,6 +52,7 @@ describe('syncConnection', () => {
       refresh_token: 'old-refresh-token',
     })
     vi.mocked(accounts.fetchAccountMap).mockResolvedValueOnce(new Map())
+    vi.mocked(account.syncAccount).mockResolvedValueOnce(false)
 
     await syncConnection({ ...baseConnection }, baseConfig)
 
@@ -64,6 +65,7 @@ describe('syncConnection', () => {
       refresh_token: 'old-refresh-token',
     })
     vi.mocked(accounts.fetchAccountMap).mockResolvedValueOnce(new Map())
+    vi.mocked(account.syncAccount).mockResolvedValueOnce(false)
 
     await syncConnection({ ...baseConnection }, baseConfig)
 
@@ -77,7 +79,33 @@ describe('syncConnection', () => {
     )
   })
 
-  it('logs an error and does not throw when refreshToken fails with axios error', async () => {
+  it('returns updated account with new lastSyncDate when syncAccount returns true', async () => {
+    vi.mocked(truelayer.refreshToken).mockResolvedValueOnce({
+      access_token: 'new-access',
+      refresh_token: 'old-refresh-token',
+    })
+    vi.mocked(accounts.fetchAccountMap).mockResolvedValueOnce(new Map())
+    vi.mocked(account.syncAccount).mockResolvedValueOnce(true)
+
+    const result = await syncConnection({ ...baseConnection }, baseConfig)
+
+    expect(result?.accounts[0].lastSyncDate).toBe(new Date().toISOString().slice(0, 10))
+  })
+
+  it('returns account unchanged when syncAccount returns false', async () => {
+    vi.mocked(truelayer.refreshToken).mockResolvedValueOnce({
+      access_token: 'new-access',
+      refresh_token: 'old-refresh-token',
+    })
+    vi.mocked(accounts.fetchAccountMap).mockResolvedValueOnce(new Map())
+    vi.mocked(account.syncAccount).mockResolvedValueOnce(false)
+
+    const result = await syncConnection({ ...baseConnection }, baseConfig)
+
+    expect(result?.accounts[0].lastSyncDate).toBeUndefined()
+  })
+
+  it('returns undefined when authentication fails', async () => {
     const axiosError = Object.assign(new Error('Unauthorized'), {
       isAxiosError: true,
       response: { data: { error: 'invalid_client' } },
@@ -85,14 +113,32 @@ describe('syncConnection', () => {
     vi.mocked(truelayer.refreshToken).mockRejectedValueOnce(axiosError)
     vi.mocked(axios.isAxiosError).mockReturnValueOnce(true)
 
-    await expect(syncConnection({ ...baseConnection }, baseConfig)).resolves.toBeUndefined()
+    const result = await syncConnection({ ...baseConnection }, baseConfig)
+
+    expect(result).toBeUndefined()
     expect(accounts.fetchAccountMap).not.toHaveBeenCalled()
   })
 
-  it('logs an error and does not throw when refreshToken fails with a generic error', async () => {
+  it('returns undefined when authentication fails with a generic error', async () => {
     vi.mocked(truelayer.refreshToken).mockRejectedValueOnce(new Error('Network failure'))
     vi.mocked(axios.isAxiosError).mockReturnValueOnce(false)
 
-    await expect(syncConnection({ ...baseConnection }, baseConfig)).resolves.toBeUndefined()
+    const result = await syncConnection({ ...baseConnection }, baseConfig)
+
+    expect(result).toBeUndefined()
+  })
+
+  it('returns partial connection with new token when sync fails after authentication', async () => {
+    vi.mocked(truelayer.refreshToken).mockResolvedValueOnce({
+      access_token: 'new-access',
+      refresh_token: 'new-refresh',
+    })
+    vi.mocked(accounts.fetchAccountMap).mockRejectedValueOnce(new Error('API error'))
+    vi.mocked(axios.isAxiosError).mockReturnValueOnce(false)
+
+    const result = await syncConnection({ ...baseConnection }, baseConfig)
+
+    expect(result?.refreshToken).toBe('new-refresh')
+    expect(result?.accounts).toEqual(baseConnection.accounts)
   })
 })

@@ -13,9 +13,12 @@ async function mainTask(config: Config): Promise<void> {
       verbose: !!config.env.DEBUG,
     })
 
-    for (const connection of config.connections) {
-      await syncConnection(connection, config)
-      await writeConfig(config)
+    for (let i = 0; i < config.connections.length; i++) {
+      const updated = await syncConnection(config.connections[i], config)
+      if (updated) {
+        config.connections[i] = updated
+        await writeConfig(config)
+      }
     }
   } catch (e) {
     console.error('\nGlobal Sync Error:', String(e))
