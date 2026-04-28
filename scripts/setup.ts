@@ -3,7 +3,7 @@
  * Interactive setup script for adding a new TrueLayer connection.
  *
  * Local:  npm run setup
- * Docker: docker compose run --rm actual-sync npm run setup
+ * Docker: docker compose run --rm actual-truelayer-sync npm run setup
  */
 
 import { input, select, checkbox, confirm } from '@inquirer/prompts'
