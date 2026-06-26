@@ -4,9 +4,9 @@
   "description": "Sync bank transactions to Actual Budget from TrueLayer",
   "main": "sync.js",
   "scripts": {
-    "build": "tsc --project tsconfig.build.json",
+    "build": "tsc --project tsconfig.build.json && tsc --project tsconfig.scripts.json",
     "start": "node dist/sync.js",
-    "setup": "tsx scripts/setup.ts",
+    "setup": "node dist/scripts/setup.js",
     "dev": "tsx --env-file=.env src/sync.ts",
     "dev:dry-run": "tsx --env-file=.env src/sync.ts --dry-run",
     "dev:setup": "tsx --env-file=.env scripts/setup.ts",

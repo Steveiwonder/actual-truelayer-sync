@@ -6,17 +6,15 @@
  * Docker: docker compose run --rm actual-truelayer-sync npm run setup
  */
 
-import { input, select, checkbox, confirm } from '@inquirer/prompts'
 import fs from 'fs'
 import path from 'path'
 import { z } from 'zod'
 import { exchangeCode, getMe, listAccounts, listCards } from '../src/truelayer/truelayer'
-import { initActual, getAccounts, shutdownActual } from '../src/actual/actual'
 import { readJSON, writeJSON } from '../src/utils/file'
 import type { FileConfig, State } from '../src/config/schema'
 
 // Paths
-const DATA_DIR = path.resolve(__dirname, '..', 'data')
+const DATA_DIR = path.resolve(process.cwd(), 'data')
 const CONFIG_PATH = path.join(DATA_DIR, 'config.json')
 const STATE_PATH = path.join(DATA_DIR, 'state.json')
 
@@ -70,6 +68,7 @@ async function main(): Promise<void> {
     process.exit(1)
   }
   const env = envResult.data
+  const { input, select, checkbox, confirm } = await import('@inquirer/prompts')
 
   // 2. Load existing config / state (may not exist on first run)
   const existingConfig = await tryReadJSON<FileConfig>(CONFIG_PATH)
@@ -210,22 +209,26 @@ async function main(): Promise<void> {
   if (selectedIds.length > 0) {
     console.log('\nConnecting to Actual Budget...')
     let actualAccounts: Array<{ id: string; name: string }> = []
+    let shutdownActual: (() => Promise<void>) | undefined
 
     try {
-      await initActual({
+      const actual = await import('../src/actual/actual.js')
+      shutdownActual = actual.shutdownActual
+
+      await actual.initActual({
         serverURL: env.ACTUAL_SERVER_URL,
         password: env.ACTUAL_SERVER_PASSWORD,
         syncId: env.ACTUAL_SYNC_ID,
         verbose: false,
       })
-      const all = await getAccounts()
+      const all = await actual.getAccounts()
       actualAccounts = all.filter((a) => !a.closed && !mappedActualIds.has(a.id))
     } catch (err) {
       console.error(`Could not connect to Actual Budget: ${err instanceof Error ? err.message : String(err)}`)
       console.log('Skipping account mapping — add actualId values to config.json manually.\n')
     } finally {
       try {
-        await shutdownActual()
+        await shutdownActual?.()
       } catch {
         // ignore shutdown errors
       }
