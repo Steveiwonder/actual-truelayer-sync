@@ -11,7 +11,7 @@ import path from 'path'
 import { z } from 'zod'
 import { exchangeCode, getMe, listAccounts, listCards } from '../src/truelayer/truelayer'
 import { readJSON, writeJSON } from '../src/utils/file'
-import type { FileConfig, State } from '../src/config/schema'
+import type { Connection, FileConfig, State } from '../src/config/schema'
 
 // Paths
 const DATA_DIR = path.resolve(process.cwd(), 'data')
@@ -29,6 +29,12 @@ const SCOPES = {
 } as const
 
 type Scope = keyof typeof SCOPES
+type SetupAction = 'add' | 'reauth'
+type TextPrompt = (options: {
+  message: string
+  validate?: (value: string) => true | string
+  default?: string
+}) => Promise<string>
 
 function buildAuthUrl(clientId: string, scope: string, redirectUri: string): string {
   const params = new URLSearchParams({
@@ -41,11 +47,62 @@ function buildAuthUrl(clientId: string, scope: string, redirectUri: string): str
   return `${TRUELAYER_AUTH_BASE}/?${params}`
 }
 
+function getScopeForConnection(connection: Connection): Scope {
+  return connection.isCard || connection.accounts.some((account) => account.isCard) ? 'cards' : 'accounts'
+}
+
 async function tryReadJSON<T>(filePath: string): Promise<T | null> {
   try {
     return await readJSON<T>(filePath)
   } catch {
     return null
+  }
+}
+
+async function authorizeTrueLayer(
+  input: TextPrompt,
+  clientId: string,
+  clientSecret: string,
+  scope: string,
+): Promise<{ accessToken: string; refreshToken: string }> {
+  const redirectUri = (
+    await input({
+      message: 'Redirect URI registered with TrueLayer:',
+      validate: (v) => (v.trim().length > 0 ? true : 'Required'),
+      default: 'https://console.truelayer.com/redirect-page',
+    })
+  ).trim()
+
+  const authUrl = buildAuthUrl(clientId, scope, redirectUri)
+  console.log('\nOpen this URL in your browser to authenticate:\n')
+  console.log(`  ${authUrl}\n`)
+
+  const pastedUrl = await input({
+    message: 'Paste the full redirect URL after completing auth:',
+    validate: (v) => {
+      try {
+        new URL(v)
+        return true
+      } catch {
+        return 'Enter a valid URL'
+      }
+    },
+  })
+
+  const code = new URL(pastedUrl).searchParams.get('code')
+  if (!code) {
+    console.error('No "code" parameter found in the URL. Make sure you pasted the full redirect URL.')
+    process.exit(1)
+  }
+
+  console.log('\nExchanging code for tokens...')
+  try {
+    const tokens = await exchangeCode(clientId, clientSecret, code, redirectUri)
+    console.log('Authenticated successfully.\n')
+    return { accessToken: tokens.access_token, refreshToken: tokens.refresh_token }
+  } catch (err) {
+    console.error(`Token exchange failed: ${err instanceof Error ? err.message : String(err)}`)
+    process.exit(1)
   }
 }
 
@@ -73,9 +130,73 @@ async function main(): Promise<void> {
   // 2. Load existing config / state (may not exist on first run)
   const existingConfig = await tryReadJSON<FileConfig>(CONFIG_PATH)
   const existingState = await tryReadJSON<State>(STATE_PATH)
+  const existingConnections = existingConfig?.connections ?? []
 
-  const existingConnectionNames = new Set(existingConfig?.connections.map((c) => c.name) ?? [])
-  const mappedActualIds = new Set(existingConfig?.connections.flatMap((c) => c.accounts.map((a) => a.actualId)) ?? [])
+  const action: SetupAction =
+    existingConnections.length > 0
+      ? await select<SetupAction>({
+          message: 'What do you want to do?',
+          choices: [
+            { name: 'Add a new TrueLayer connection', value: 'add' },
+            { name: 'Re-authenticate an existing connection', value: 'reauth' },
+          ],
+        })
+      : 'add'
+
+  if (action === 'reauth') {
+    const selectedConnectionName = await select<string>({
+      message: 'Which connection do you want to re-authenticate?',
+      choices: existingConnections.map((connection) => ({
+        name: `${connection.name} (${getScopeForConnection(connection)}, ${connection.accounts.length} mapped account${
+          connection.accounts.length === 1 ? '' : 's'
+        })`,
+        value: connection.name,
+      })),
+    })
+
+    const connection = existingConnections.find((c) => c.name === selectedConnectionName)!
+    const connectionType = getScopeForConnection(connection)
+    const { refreshToken } = await authorizeTrueLayer(
+      input,
+      env.TRUELAYER_CLIENT_ID,
+      env.TRUELAYER_CLIENT_SECRET,
+      SCOPES[connectionType],
+    )
+
+    console.log('\n--- Summary ---')
+    console.log(`Connection      : ${connection.name}`)
+    console.log(`Type            : ${connectionType}`)
+    console.log(`Mapped accounts : ${connection.accounts.length}`)
+    console.log('Config changes  : none')
+    console.log('State changes   : refresh token will be replaced')
+    console.log('---------------\n')
+
+    const ok = await confirm({ message: `Update refresh token for "${connection.name}"?`, default: true })
+    if (!ok) {
+      console.log('Aborted — no files written.')
+      process.exit(0)
+    }
+
+    fs.mkdirSync(DATA_DIR, { recursive: true })
+
+    const updatedState: State = {
+      connections: {
+        ...(existingState?.connections ?? {}),
+        [connection.name]: {
+          refreshToken,
+          accounts: existingState?.connections[connection.name]?.accounts ?? {},
+        },
+      },
+    }
+
+    await writeJSON(STATE_PATH, updatedState)
+
+    console.log(`\nDone! Re-authenticated "${connection.name}". Existing account mappings were preserved.`)
+    return
+  }
+
+  const existingConnectionNames = new Set(existingConnections.map((c) => c.name))
+  const mappedActualIds = new Set(existingConnections.flatMap((c) => c.accounts.map((a) => a.actualId)))
 
   // 3. Connection type — determines OAuth scope
   const connectionType = await select<Scope>({
@@ -87,52 +208,12 @@ async function main(): Promise<void> {
   })
   const scope = SCOPES[connectionType]
 
-  // 4. Redirect URI
-  const redirectUri = (
-    await input({
-      message: 'Redirect URI registered with TrueLayer:',
-      validate: (v) => (v.trim().length > 0 ? true : 'Required'),
-      default: 'https://console.truelayer.com/redirect-page',
-    })
-  ).trim()
-
-  // 5. Display auth URL
-  const authUrl = buildAuthUrl(env.TRUELAYER_CLIENT_ID, scope, redirectUri)
-  console.log('\nOpen this URL in your browser to authenticate:\n')
-  console.log(`  ${authUrl}\n`)
-
-  const pastedUrl = await input({
-    message: 'Paste the full redirect URL after completing auth:',
-    validate: (v) => {
-      try {
-        new URL(v)
-        return true
-      } catch {
-        return 'Enter a valid URL'
-      }
-    },
-  })
-
-  // 6. Parse auth code
-  const code = new URL(pastedUrl).searchParams.get('code')
-  if (!code) {
-    console.error('No "code" parameter found in the URL. Make sure you pasted the full redirect URL.')
-    process.exit(1)
-  }
-
-  // 7. Exchange code for tokens
-  console.log('\nExchanging code for tokens...')
-  let accessToken: string
-  let newRefreshToken: string
-  try {
-    const tokens = await exchangeCode(env.TRUELAYER_CLIENT_ID, env.TRUELAYER_CLIENT_SECRET, code, redirectUri)
-    accessToken = tokens.access_token
-    newRefreshToken = tokens.refresh_token
-  } catch (err) {
-    console.error(`Token exchange failed: ${err instanceof Error ? err.message : String(err)}`)
-    process.exit(1)
-  }
-  console.log('Authenticated successfully.\n')
+  const { accessToken, refreshToken: newRefreshToken } = await authorizeTrueLayer(
+    input,
+    env.TRUELAYER_CLIENT_ID,
+    env.TRUELAYER_CLIENT_SECRET,
+    scope,
+  )
 
   // 8. Fetch provider name for connection name default
   let providerDisplayName: string | undefined
